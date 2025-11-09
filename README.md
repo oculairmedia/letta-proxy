@@ -45,14 +45,7 @@ docker-compose up -d
 
 ### Using Pre-built Images
 
-Images are automatically built and published to Docker Hub on every commit:
-
-```bash
-docker pull oculair/letta-webhook-proxy:latest
-docker pull oculair/letta-context-poller:latest
-```
-
-Also available on GitHub Container Registry:
+Images are automatically built and published to GitHub Container Registry on every commit:
 
 ```bash
 docker pull ghcr.io/oculairmedia/letta-webhook-proxy:latest
@@ -132,14 +125,9 @@ docker build -t oculair/letta-context-poller:latest ./poller
 
 GitHub Actions automatically builds and publishes Docker images on every push to `main`:
 
-- **Docker Hub**: `oculair/letta-webhook-proxy:latest` and `oculair/letta-context-poller:latest`
 - **GHCR**: `ghcr.io/oculairmedia/letta-webhook-proxy:latest` and `ghcr.io/oculairmedia/letta-context-poller:latest`
 
-### Required Secrets
-
-Add these secrets to your GitHub repository:
-
-- `DOCKERHUB_TOKEN` - Docker Hub access token for pushing images
+No additional secrets required - uses the automatic `GITHUB_TOKEN` for authentication.
 
 ## Architecture
 

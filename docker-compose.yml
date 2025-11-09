@@ -5,7 +5,7 @@ volumes:
 
 services:
   letta-poller:
-    image: oculair/letta-context-poller:latest
+    image: ghcr.io/oculairmedia/letta-context-poller:latest
     build:
       context: ./poller
       dockerfile: Dockerfile
@@ -36,7 +36,7 @@ services:
       '
 
   proxy:
-    image: oculair/letta-webhook-proxy:latest
+    image: ghcr.io/oculairmedia/letta-webhook-proxy:latest
     build:
       context: ./proxy
       dockerfile: Dockerfile
