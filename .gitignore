@@ -30,4 +30,6 @@ Thumbs.db
 
 # State files
 state/
-*.json
+# Only ignore JSON files in state directory, not all JSON files
+# This allows package.json, package-lock.json, tsconfig.json, etc.
+state/*.json
