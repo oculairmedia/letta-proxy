@@ -1,0 +1,59 @@
+version: '3.8'
+
+volumes:
+  letta-polling-state:
+
+services:
+  letta-poller:
+    image: oculair/letta-context-poller:latest
+    build:
+      context: ./poller
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      - BS_URL=${BS_URL:-https://knowledge.oculair.ca}
+      - BS_TOKEN_ID=${BS_TOKEN_ID}
+      - BS_TOKEN_SECRET=${BS_TOKEN_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GRAPHITI_ENDPOINT=${GRAPHITI_ENDPOINT:-http://192.168.50.90:8003}
+      - LETTA_DISABLE_INITIAL_HISTORY_PULL=${LETTA_DISABLE_INITIAL_HISTORY_PULL:-true}
+      - LETTA_BASE_URL=${LETTA_BASE_URL:-https://letta2.oculair.ca}
+      - LETTA_PASSWORD=${LETTA_PASSWORD}
+    volumes:
+      - letta-polling-state:/app/state
+    networks:
+      - letta-net
+    command: |
+      sh -c '
+        echo "Starting Letta Polling Service..."
+        while true; do
+          echo "Running Letta agent polling script..."
+          python list_letta_agents.py;
+          echo "Polling finished. Sleeping for 30 seconds...";
+          sleep 30;
+        done
+      '
+
+  proxy:
+    image: oculair/letta-webhook-proxy:latest
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8289:8283"
+    environment:
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://192.168.50.90:5005/webhook}
+      - DEBUG=${DEBUG:-true}
+      - NODE_ENV=${NODE_ENV:-development}
+      - LETTA_API_URL=${LETTA_API_URL:-http://192.168.50.90:8283}
+      - GRAPHITI_AGENTS_FILE=/app/state/graphiti_agents.json
+      - WATCH_TAGS=graphiti
+    volumes:
+      - letta-polling-state:/app/state:ro
+    networks:
+      - letta-net
+
+networks:
+  letta-net:
+    driver: bridge
