@@ -118,7 +118,10 @@ async function forwardRequest(c: Context) {
   });
   
   try {
-    const targetUrl = new URL(path, LETTA_API_URL);
+    // Use the full request URL to preserve query parameters
+    const requestUrl = new URL(req.url);
+    const targetUrl = new URL(requestUrl.pathname + requestUrl.search, LETTA_API_URL);
+    console.log(`Forwarding to: ${targetUrl.toString()}`);
 
     // remove headers
     if (req.headers.get("host")) {
