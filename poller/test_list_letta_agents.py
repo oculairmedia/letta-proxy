@@ -276,6 +276,47 @@ class TestFormatMessageForGraphiti:
         assert result is not None
         assert result["role_type"] == "assistant"
 
+    def test_format_message_with_message_type_field(self):
+        """Test formatting when API returns 'message_type' instead of 'type'.
+        
+        The Letta API returns 'message_type' field but older code expected 'type'.
+        This test ensures both field names are handled correctly.
+        """
+        from list_letta_agents import format_message_for_graphiti
+        
+        # This is the actual format returned by the Letta API
+        message = {
+            "id": "message-003",
+            "message_type": "assistant_message",  # API uses 'message_type' not 'type'
+            "content": "Test response from agent",
+            "date": "2024-01-01T12:00:00Z",  # API uses 'date' not 'created_at'
+            "sender_id": None,
+        }
+        
+        result = format_message_for_graphiti(message)
+        
+        assert result is not None
+        assert result["role_type"] == "assistant"
+        assert "Test response" in result["content"]
+
+    def test_format_user_message_with_api_fields(self):
+        """Test formatting user message with actual API field names."""
+        from list_letta_agents import format_message_for_graphiti
+        
+        message = {
+            "id": "message-004",
+            "message_type": "user_message",
+            "content": "Hello from user",
+            "date": "2024-01-01T12:00:00Z",
+            "sender_id": "user-456",
+        }
+        
+        result = format_message_for_graphiti(message)
+        
+        assert result is not None
+        assert result["role_type"] == "user"
+        assert "Hello from user" in result["content"]
+
     def test_skip_tool_return_message(self):
         """Test that tool return messages are skipped."""
         from list_letta_agents import format_message_for_graphiti

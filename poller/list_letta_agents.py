@@ -413,15 +413,18 @@ def format_message_for_graphiti(
         Dict with formatted message or None if message should be skipped
     """
     message_id = message_obj['id']
-    message_type = message_obj.get('type')
-    created_at_str = message_obj.get('created_at')
-    message_api_user_id = message_obj.get('user_id')
+    # Handle both 'type' and 'message_type' field names (API returns 'message_type')
+    message_type = message_obj.get('type') or message_obj.get('message_type')
+    # Handle both 'created_at' and 'date' field names
+    created_at_str = message_obj.get('created_at') or message_obj.get('date')
+    # Handle both 'user_id' and 'sender_id' field names
+    message_api_user_id = message_obj.get('user_id') or message_obj.get('sender_id')
     
     # Infer message type if None
     if message_type is None:
         if message_obj.get('reasoning') is not None:
             message_type = 'reasoning_message'
-        elif message_obj.get('user_id') is not None and message_obj.get('content') is not None:
+        elif (message_obj.get('user_id') or message_obj.get('sender_id')) is not None and message_obj.get('content') is not None:
             message_type = 'user_message'
         elif message_obj.get('content') is not None:
             message_type = 'assistant_message'
@@ -579,7 +582,7 @@ async def main():
                     print(f"  Skipping already processed Message ID: {msg['id']}")
                     continue
 
-                print(f"  Processing Message ID: {msg['id']}, Type: {msg.get('type')}")
+                print(f"  Processing Message ID: {msg['id']}, Type: {msg.get('type') or msg.get('message_type')}")
                 
                 formatted_msg = format_message_for_graphiti(msg, admin_user_map)
                 if formatted_msg:
