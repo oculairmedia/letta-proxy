@@ -318,13 +318,16 @@ def fetch_new_messages_for_agent(
     
     # Initial parameters
     params = {
-        'limit': 100,  # Request a larger batch size to minimize API calls
-        'order': 'desc'  # Get newest messages first
+        'limit': 1,  # Only fetch 1 message to check for new activity
+        'order': 'desc',  # Get newest messages first
+        'use_assistant_message': 'false',  # Use raw message format
     }
     
     # Use last_message_id to only fetch messages after the last processed one
     if last_message_id:
         params['after'] = last_message_id
+    
+    tried_without_after = False
     
     while True:
         try:
@@ -337,6 +340,15 @@ def fetch_new_messages_for_agent(
             
             # Check if we got any messages
             if not messages_batch:
+                # If we had an 'after' param and got no results, the message ID might be stale/deleted
+                # Try once without 'after' to get the latest message and reset state
+                if 'after' in params and not tried_without_after:
+                    tried_without_after = True
+                    print(
+                        f"  No messages found with after={params['after']}, trying without 'after' param (message ID may be stale)"
+                    )
+                    del params['after']
+                    continue
                 break
                 
             # Add the current batch to our collection
@@ -351,6 +363,15 @@ def fetch_new_messages_for_agent(
             params['after'] = messages_batch[-1]['id']
             
         except requests.exceptions.RequestException as e:
+            # Handle 404 errors specially - the stored message ID may have been deleted
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
+                if 'after' in params and not tried_without_after:
+                    tried_without_after = True
+                    print(
+                        f"  Message ID {params['after']} not found (404), trying without 'after' param to reset state"
+                    )
+                    del params['after']
+                    continue
             print(f"Error retrieving messages for agent {agent_id}: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 print(f"Response status code: {e.response.status_code}")
