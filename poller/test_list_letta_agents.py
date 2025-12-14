@@ -62,9 +62,10 @@ class TestFetchNewMessagesForAgent:
     def test_fetch_messages_no_prior_state(self, mock_headers, api_url_base):
         """Test fetching messages when there's no prior polling state."""
         from list_letta_agents import fetch_new_messages_for_agent
-        
+
         # Mock returns 1 message, then empty (simulating end of messages)
         call_count = [0]
+
         def mock_get_side_effect(*args, **kwargs):
             call_count[0] += 1
             response = Mock()
@@ -86,43 +87,42 @@ class TestFetchNewMessagesForAgent:
                 last_message_id=None,
             )
 
-            # Should not include 'after' param on first call when no prior state
             first_call_args = mock_get.call_args_list[0]
-            assert "after" not in first_call_args.kwargs.get("params", {})
-            
-            # Messages should be returned
+            first_params = first_call_args.kwargs.get("params", {})
+
+            # No cursor on first call
+            assert "after" not in first_params
+            # Uses correct pagination direction
+            assert first_params.get("order") == "asc"
+
             assert len(messages) == 1
 
     def test_fetch_messages_with_prior_state(self, mock_headers, api_url_base):
         """Test fetching messages with a valid last_message_id."""
         from list_letta_agents import fetch_new_messages_for_agent
-        
+
         call_count = [0]
-        captured_after_values = []  # Capture 'after' values at call time
-        
+        captured_params = []
+
         def mock_get_side_effect(*args, **kwargs):
             call_count[0] += 1
-            params = kwargs.get('params', {})
-            # Capture the 'after' value at call time (before it might be mutated)
-            captured_after_values.append(params.get('after'))
-            
+            params = dict(kwargs.get("params", {}))
+            captured_params.append(params)
+
             response = Mock()
             response.status_code = 200
             response.raise_for_status = Mock()
-            
-            # First call with original 'after' param returns new message
-            if call_count[0] == 1 and params.get('after') == 'message-002':
+
+            # First call with original cursor returns one new message
+            if call_count[0] == 1 and params.get("after") == "message-002":
                 response.json.return_value = [
                     {"id": "message-003", "type": "user_message", "content": "New message"},
                 ]
-            # Second call (pagination check with after=message-003) returns empty - no more messages
-            elif call_count[0] == 2:
-                response.json.return_value = []
             else:
                 response.json.return_value = []
             return response
 
-        with patch("list_letta_agents.requests.get", side_effect=mock_get_side_effect) as mock_get:
+        with patch("list_letta_agents.requests.get", side_effect=mock_get_side_effect):
             messages = fetch_new_messages_for_agent(
                 agent_id="agent-123",
                 api_url_base=api_url_base,
@@ -130,9 +130,9 @@ class TestFetchNewMessagesForAgent:
                 last_message_id="message-002",
             )
 
-            # Verify first call included 'after' param with correct value
-            assert captured_after_values[0] == "message-002"
-            assert len(messages) == 1
+        assert captured_params[0].get("after") == "message-002"
+        assert captured_params[0].get("order") == "asc"
+        assert len(messages) == 1
 
     def test_fetch_messages_404_triggers_fallback(self, mock_headers, api_url_base):
         """Test that 404 errors trigger fallback to fetch without 'after' param."""
@@ -180,32 +180,20 @@ class TestFetchNewMessagesForAgent:
             assert len(messages) == 1
             assert messages[0]["id"] == "message-new"
 
-    def test_fetch_messages_empty_response_triggers_fallback(self, mock_headers, api_url_base):
-        """Test that empty response triggers fallback to fetch without 'after' param."""
+    def test_fetch_messages_empty_response_does_not_fallback(self, mock_headers, api_url_base):
+        """Test that an empty response with a valid cursor returns no messages.
+
+        With the correct pagination strategy (`order=asc` + `after`), an empty
+        response simply means "no new messages" and should not trigger a fallback.
+        """
         from list_letta_agents import fetch_new_messages_for_agent
-        
-        call_count = [0]
 
-        def mock_get_side_effect(*args, **kwargs):
-            call_count[0] += 1
-            response = Mock()
-            response.status_code = 200
-            response.raise_for_status = Mock()
-            
-            if call_count[0] == 1:
-                # First call with 'after' param - empty response
-                response.json.return_value = []
-            elif call_count[0] == 2:
-                # Second call without 'after' - has messages
-                response.json.return_value = [
-                    {"id": "message-latest", "type": "user_message", "content": "Hi"},
-                ]
-            else:
-                # No more messages
-                response.json.return_value = []
-            return response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_response.raise_for_status = Mock()
 
-        with patch("list_letta_agents.requests.get", side_effect=mock_get_side_effect):
+        with patch("list_letta_agents.requests.get", return_value=mock_response) as mock_get:
             messages = fetch_new_messages_for_agent(
                 agent_id="agent-123",
                 api_url_base=api_url_base,
@@ -213,9 +201,8 @@ class TestFetchNewMessagesForAgent:
                 last_message_id="message-stale",
             )
 
-            # Should have made at least 2 calls
-            assert call_count[0] >= 2
-            assert len(messages) == 1
+        assert mock_get.call_count == 1
+        assert messages == []
 
     def test_fetch_messages_no_retry_without_after_param(self, mock_headers, api_url_base):
         """Test that empty response without 'after' param doesn't retry infinitely."""

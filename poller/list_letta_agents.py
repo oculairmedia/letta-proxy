@@ -228,8 +228,6 @@ def get_admin_users(api_url_base: str, headers: Dict[str, str]) -> Dict[str, Dic
             print(f"Response body: {e.response.text}")
     except json.JSONDecodeError as e:
         print(f"Error decoding JSON from /admin/users/: {e}")
-        if hasattr(e, 'response') and e.response is not None:
-            print(f"Response body: {e.response.text}")
     return user_map
 
 def get_identity_details(identity_id: str, api_url_base: str, headers: Dict[str, str]) -> Optional[Dict[str, Any]]:
@@ -316,52 +314,42 @@ def fetch_new_messages_for_agent(
     endpoint = f"{api_url_base}/agents/{agent_id}/messages"
     new_messages = []
     
-    # Initial parameters
+    # Pagination strategy
+    #
+    # Letta's `after/before` params are cursor-based pagination in the specified
+    # sort order. To fetch messages newer than our stored cursor, we need to
+    # request messages in chronological order (`asc`) and page forward with
+    # `after=<last_message_id>`.
     params = {
-        'limit': 1,  # Only fetch 1 message to check for new activity
-        'order': 'desc',  # Get newest messages first
-        'use_assistant_message': 'false',  # Use raw message format
+        'limit': 100,
+        'order': 'asc',
+        'use_assistant_message': 'false',
     }
-    
+
     # Use last_message_id to only fetch messages after the last processed one
     if last_message_id:
         params['after'] = last_message_id
-    
+
     tried_without_after = False
-    
+
     while True:
         try:
-            # Make the API request
             response = requests.get(endpoint, headers=headers, params=params)
-            response.raise_for_status()  # Raise exception for HTTP errors
-            
-            # Parse the response
+            response.raise_for_status()
+
             messages_batch = response.json()
-            
-            # Check if we got any messages
+
             if not messages_batch:
-                # If we had an 'after' param and got no results, the message ID might be stale/deleted
-                # Try once without 'after' to get the latest message and reset state
-                if 'after' in params and not tried_without_after:
-                    tried_without_after = True
-                    print(
-                        f"  No messages found with after={params['after']}, trying without 'after' param (message ID may be stale)"
-                    )
-                    del params['after']
-                    continue
                 break
-                
-            # Add the current batch to our collection
+
             new_messages.extend(messages_batch)
-            
-            # Check if we've reached the end of the list
+
             if len(messages_batch) < params['limit']:
                 break
-                
-            # Update the 'after' parameter for the next page
-            # Use the ID of the last message in the current batch
+
+            # Continue paging forward in chronological order
             params['after'] = messages_batch[-1]['id']
-            
+
         except requests.exceptions.RequestException as e:
             # Handle 404 errors specially - the stored message ID may have been deleted
             if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
@@ -376,10 +364,8 @@ def fetch_new_messages_for_agent(
             if hasattr(e, 'response') and e.response is not None:
                 print(f"Response status code: {e.response.status_code}")
                 print(f"Response body: {e.response.text}")
-            return []  # Return empty list instead of exiting to allow processing other agents
-    
-    if new_messages:
-        new_messages.reverse() # Reverse to make them chronological for processing
+            return []
+
     return new_messages
 
 def summarize_agent(agent: Dict[str, Any]) -> Dict[str, Any]:
@@ -400,7 +386,7 @@ def summarize_agent(agent: Dict[str, Any]) -> Dict[str, Any]:
 
 def format_message_for_graphiti(
     message_obj: Dict[str, Any],
-    admin_user_map: Dict[str, Dict[str, Any]] = None
+    admin_user_map: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Format a Letta message for Graphiti HTTP API.
