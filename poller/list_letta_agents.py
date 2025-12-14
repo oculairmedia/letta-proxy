@@ -35,6 +35,42 @@ STATE_FILE_PATH = "/app/state/polling_state.json"
 ALLOWED_MESSAGE_TYPES = {"reasoning_message", "assistant_message", "user_message"}
 SKIPPED_MESSAGE_TYPES = {"tool_return_message"}
 
+# Agents to exclude from Graphiti ingestion (e.g., sleeptime agents, system agents)
+# These agents' conversations will not be sent to the knowledge graph
+EXCLUDED_AGENT_IDS = set(os.getenv('GRAPHITI_EXCLUDED_AGENT_IDS', '').split(','))
+EXCLUDED_AGENT_IDS.discard('')  # Remove empty string if env var is empty
+
+# Agent name patterns to exclude (case-insensitive partial match)
+EXCLUDED_AGENT_NAME_PATTERNS = [
+    'sleeptime',  # Sleeptime memory agents
+    '-sleeptime',  # Agents ending with -sleeptime
+]
+
+
+def should_exclude_agent(agent_id: str, agent_name: str) -> bool:
+    """
+    Check if an agent should be excluded from Graphiti ingestion.
+
+    Args:
+        agent_id: The agent's ID
+        agent_name: The agent's name
+
+    Returns:
+        True if the agent should be excluded, False otherwise
+    """
+    # Check if agent ID is explicitly excluded
+    if agent_id in EXCLUDED_AGENT_IDS:
+        return True
+
+    # Check if agent name matches any exclusion patterns
+    agent_name_lower = agent_name.lower()
+    for pattern in EXCLUDED_AGENT_NAME_PATTERNS:
+        if pattern.lower() in agent_name_lower:
+            return True
+
+    return False
+
+
 def load_config() -> Dict[str, str]:
     """
     Load configuration from environment variables.
@@ -488,6 +524,11 @@ async def main():
         agent_id = agent_summary['id']
         agent_name = agent_summary.get('name', 'Unnamed Agent')
 
+        # Check if agent should be excluded from Graphiti ingestion
+        if should_exclude_agent(agent_id, agent_name):
+            print(f"\nSkipping excluded agent {i}/{len(agents)}: {agent_name} (ID: {agent_id})")
+            continue
+
         print(f"\nPolling for agent {i}/{len(agents)}: {agent_name} (ID: {agent_id}).")
         last_message_id_for_agent = polling_state.get(agent_id)
         if last_message_id_for_agent:
@@ -512,6 +553,11 @@ async def main():
             newest_message_id_in_batch = None
             
             for msg in fetched_messages:
+                # Skip messages we've already processed (prevents duplicate ingestion when fallback is used)
+                if last_message_id_for_agent and msg['id'] == last_message_id_for_agent:
+                    print(f"  Skipping already processed Message ID: {msg['id']}")
+                    continue
+
                 print(f"  Processing Message ID: {msg['id']}, Type: {msg.get('type')}")
                 
                 formatted_msg = format_message_for_graphiti(msg, admin_user_map)
