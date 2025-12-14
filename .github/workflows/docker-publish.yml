@@ -11,7 +11,30 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  test-poller:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: ./poller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: ./poller
+        run: |
+          pytest test_list_letta_agents.py -v --tb=short
+
   build-and-push:
+    needs: test-poller
     runs-on: ubuntu-latest
     permissions:
       contents: read
