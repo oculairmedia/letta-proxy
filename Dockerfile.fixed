@@ -1,0 +1,24 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY --from=oculair/letta-webhook-proxy:latest /app/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy fixed source
+COPY fix-source/index.ts ./src/
+
+# Copy other necessary files from original image
+COPY --from=oculair/letta-webhook-proxy:latest /app/tsconfig.json ./
+
+# Build TypeScript
+RUN npm run build
+
+# Expose port
+EXPOSE 8283
+
+# Start the proxy
+CMD ["node", "dist/index.js"]

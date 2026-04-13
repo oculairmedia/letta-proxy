@@ -13,6 +13,21 @@ __pycache__/
 env/
 venv/
 .venv/
+source/venv/
+
+# Vendored Python packages (installed in container, not tracked)
+source/aiohttp*/
+source/aiohappyeyeballs*/
+source/aiosignal*/
+source/attr*/
+source/attrs*/
+source/frozenlist*/
+source/idna*/
+source/multidict*/
+source/propcache*/
+source/yarl*/
+source/*-dist-info/
+source/*.dist-info/
 
 # Environment
 .env
@@ -33,3 +48,29 @@ state/
 # Only ignore JSON files in state directory, not all JSON files
 # This allows package.json, package-lock.json, tsconfig.json, etc.
 state/*.json
+source/polling_state.json
+source/.coverage
+
+# MCP temp files
+source/mcp-neo4j-temp/
+
+# Plane submodule
+plane-projectmanagement_mcp/
+
+# Stale/legacy dirs
+source/letta-proxy.js/
+source/letta tools/
+source/mcp-servers/
+fix-source/
+!fix-source/
+!fix-source/index.ts
+docs/
+Dockerfile.fixed
+!Dockerfile.fixed
+.serena/
+.sisyphus/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
