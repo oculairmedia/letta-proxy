@@ -13,6 +13,10 @@ const app = new Hono();
 const PORT = parseInt(process.env.LETTA_PROXY_PORT || "8283", 10);
 const LETTA_API_URL = process.env.LETTA_API_URL;
 const LETTA_API_KEY = process.env.LETTA_API_KEY;
+const REGISTRY_API_URL = process.env.REGISTRY_API_URL || "http://192.168.50.90:3099";
+const UPSTREAM_LETTA_API_KEY = process.env.UPSTREAM_LETTA_API_KEY || LETTA_API_KEY;
+const REQUIRE_PUBLIC_AUTH = process.env.REQUIRE_PUBLIC_AUTH === "true";
+const PUBLIC_AUTH_TOKEN = process.env.PUBLIC_AUTH_TOKEN || process.env.LETTA_PASSWORD;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
@@ -93,10 +97,27 @@ function isMessageSendRequest(path: string, method: string): boolean {
   return false;
 }
 
+function hasValidPublicAuth(headers: Headers): boolean {
+  if (!REQUIRE_PUBLIC_AUTH) return true;
+  if (!PUBLIC_AUTH_TOKEN) {
+    console.error("REQUIRE_PUBLIC_AUTH is enabled but PUBLIC_AUTH_TOKEN/LETTA_PASSWORD is not set");
+    return false;
+  }
+
+  const authorization = headers.get("Authorization");
+  const barePassword = headers.get("X-BARE-PASSWORD");
+
+  return (
+    authorization === `Bearer ${PUBLIC_AUTH_TOKEN}` ||
+    barePassword === `password ${PUBLIC_AUTH_TOKEN}`
+  );
+}
+
 async function forwardRequest(c: Context) {
   const req = c.req.raw.clone();
   const path = c.req.path;
   const method = req.method;
+  const isRegistryRequest = path === "/api/registry" || path.startsWith("/api/registry/");
   
   // Add debug logging
   console.log(`Request received:`, {
@@ -116,11 +137,18 @@ async function forwardRequest(c: Context) {
       batchMessage: !!path.match(/\/v1\/messages\/batches\/?$/)
     }
   });
+
+  if (!hasValidPublicAuth(req.headers)) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
   
   try {
-    // Use the full request URL to preserve query parameters
     const requestUrl = new URL(req.url);
-    const targetUrl = new URL(requestUrl.pathname + requestUrl.search, LETTA_API_URL);
+    const targetBaseUrl = isRegistryRequest ? REGISTRY_API_URL : LETTA_API_URL;
+    const targetUrl = new URL(requestUrl.pathname + requestUrl.search, targetBaseUrl);
     console.log(`Forwarding to: ${targetUrl.toString()}`);
 
     // remove headers
@@ -136,13 +164,14 @@ async function forwardRequest(c: Context) {
       req.headers.delete("content-length");
     }
 
-    if (req.headers.has("Authorization")) {
-      req.headers.delete("Authorization");
-    }
-
-    // Ensure API key is set if LETTA_API_KEY is present
-    if (LETTA_API_KEY) {
-      req.headers.set("Authorization", `Bearer ${LETTA_API_KEY}`);
+    if (!isRegistryRequest && UPSTREAM_LETTA_API_KEY) {
+      if (req.headers.has("Authorization")) {
+        req.headers.delete("Authorization");
+      }
+      if (req.headers.has("X-BARE-PASSWORD")) {
+        req.headers.delete("X-BARE-PASSWORD");
+      }
+      req.headers.set("Authorization", `Bearer ${UPSTREAM_LETTA_API_KEY}`);
     }
 
     let body;
@@ -155,10 +184,12 @@ async function forwardRequest(c: Context) {
         const clonedReq = req.clone();
         bodyText = await clonedReq.text();
         
-        body = JSON.parse(bodyText);
-        body = JSON.stringify(body);
+        if (bodyText && bodyText.trim()) {
+          body = JSON.parse(bodyText);
+          body = JSON.stringify(body);
+        }
       } else if (contentType.includes("multipart/form-data")) {
-        body = await req.formData();
+        body = await req.arrayBuffer();
       } else {
         body = await req.arrayBuffer();
       }

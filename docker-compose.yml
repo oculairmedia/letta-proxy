@@ -46,7 +46,35 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL:-http://192.168.50.90:5005/webhook}
       - DEBUG=${DEBUG:-true}
       - NODE_ENV=${NODE_ENV:-development}
-      - LETTA_API_URL=${LETTA_API_URL:-http://192.168.50.90:8283}
+      - LETTA_PROXY_PORT=8283
+      - LETTA_API_URL=${LETTA_API_URL:-http://192.168.50.90:8083}
+      - REGISTRY_API_URL=${REGISTRY_API_URL:-http://192.168.50.90:3099}
+      - REQUIRE_PUBLIC_AUTH=false
+      - UPSTREAM_LETTA_API_KEY=${UPSTREAM_LETTA_API_KEY:-${LETTA_PASSWORD}}
+      - GRAPHITI_AGENTS_FILE=/app/state/graphiti_agents.json
+      - WATCH_TAGS=graphiti
+    volumes:
+      - letta-polling-state:/app/state:ro
+    networks:
+      - letta-net
+
+  proxy-public:
+    image: ghcr.io/oculairmedia/letta-webhook-proxy:latest
+    build:
+      context: ./proxy
+      dockerfile: Dockerfile
+    ports:
+      - "${PUBLIC_PROXY_PORT:-8483}:8283"
+    environment:
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://192.168.50.90:5005/webhook}
+      - DEBUG=${DEBUG:-true}
+      - NODE_ENV=${NODE_ENV:-development}
+      - LETTA_PROXY_PORT=8283
+      - LETTA_API_URL=${LETTA_API_URL:-http://192.168.50.90:8083}
+      - REGISTRY_API_URL=${REGISTRY_API_URL:-http://192.168.50.90:3099}
+      - REQUIRE_PUBLIC_AUTH=true
+      - PUBLIC_AUTH_TOKEN=${PUBLIC_AUTH_TOKEN:-${LETTA_PASSWORD}}
+      - UPSTREAM_LETTA_API_KEY=${UPSTREAM_LETTA_API_KEY:-${LETTA_PASSWORD}}
       - GRAPHITI_AGENTS_FILE=/app/state/graphiti_agents.json
       - WATCH_TAGS=graphiti
     volumes:
