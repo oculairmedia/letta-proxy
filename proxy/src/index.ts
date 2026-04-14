@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { fileURLToPath } from "node:url";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,41 +8,46 @@ import dotenv from "dotenv";
 // Load environment variables from .env file
 dotenv.config();
 
-const app = new Hono();
-
-// Configuration
-const PORT = parseInt(process.env.LETTA_PROXY_PORT || "8283", 10);
-const LETTA_API_URL = process.env.LETTA_API_URL;
-const LETTA_API_KEY = process.env.LETTA_API_KEY;
-const REGISTRY_API_URL = process.env.REGISTRY_API_URL || "http://192.168.50.90:3099";
-const UPSTREAM_LETTA_API_KEY = process.env.UPSTREAM_LETTA_API_KEY || LETTA_API_KEY;
-const REQUIRE_PUBLIC_AUTH = process.env.REQUIRE_PUBLIC_AUTH === "true";
-const PUBLIC_AUTH_TOKEN = process.env.PUBLIC_AUTH_TOKEN || process.env.LETTA_PASSWORD;
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
-
-if (!LETTA_API_URL) {
-  throw new Error("LETTA_API_URL is not set");
+export interface ProxyConfig {
+  port: number;
+  lettaApiUrl: string;
+  lettaApiKey?: string;
+  registryApiUrl: string;
+  upstreamLettaApiKey?: string;
+  requirePublicAuth: boolean;
+  publicAuthToken?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
 }
 
-app.use(
-  "*",
-  cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allowHeaders: ["*"],
-    exposeHeaders: ["*"],
-    credentials: true,
-    maxAge: 86400,
-  })
-);
+export function loadProxyConfig(env: NodeJS.ProcessEnv = process.env): ProxyConfig {
+  const lettaApiUrl = env.LETTA_API_URL;
+
+  if (!lettaApiUrl) {
+    throw new Error("LETTA_API_URL is not set");
+  }
+
+  const lettaApiKey = env.LETTA_API_KEY;
+
+  return {
+    port: parseInt(env.LETTA_PROXY_PORT || "8283", 10),
+    lettaApiUrl,
+    lettaApiKey,
+    registryApiUrl: env.REGISTRY_API_URL || "http://192.168.50.90:3099",
+    upstreamLettaApiKey: env.UPSTREAM_LETTA_API_KEY || lettaApiKey,
+    requirePublicAuth: env.REQUIRE_PUBLIC_AUTH === "true",
+    publicAuthToken: env.PUBLIC_AUTH_TOKEN || env.LETTA_PASSWORD,
+    webhookUrl: env.WEBHOOK_URL,
+    webhookSecret: env.WEBHOOK_SECRET,
+  };
+}
 
 /**
  * Sends a webhook notification when a message is sent
  * @param payload The data to send to the webhook
  */
-async function sendWebhook(payload: any) {
-  if (!WEBHOOK_URL) {
+async function sendWebhook(config: ProxyConfig, payload: unknown) {
+  if (!config.webhookUrl) {
     console.log("Webhook URL not configured, skipping webhook");
     return;
   }
@@ -52,11 +58,11 @@ async function sendWebhook(payload: any) {
     };
 
     // Add webhook secret if configured
-    if (WEBHOOK_SECRET) {
-      headers["X-Webhook-Secret"] = WEBHOOK_SECRET;
+    if (config.webhookSecret) {
+      headers["X-Webhook-Secret"] = config.webhookSecret;
     }
 
-    const response = await fetch(WEBHOOK_URL, {
+    const response = await fetch(config.webhookUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -97,9 +103,9 @@ function isMessageSendRequest(path: string, method: string): boolean {
   return false;
 }
 
-function hasValidPublicAuth(headers: Headers): boolean {
-  if (!REQUIRE_PUBLIC_AUTH) return true;
-  if (!PUBLIC_AUTH_TOKEN) {
+function hasValidPublicAuth(headers: Headers, config: ProxyConfig): boolean {
+  if (!config.requirePublicAuth) return true;
+  if (!config.publicAuthToken) {
     console.error("REQUIRE_PUBLIC_AUTH is enabled but PUBLIC_AUTH_TOKEN/LETTA_PASSWORD is not set");
     return false;
   }
@@ -108,12 +114,27 @@ function hasValidPublicAuth(headers: Headers): boolean {
   const barePassword = headers.get("X-BARE-PASSWORD");
 
   return (
-    authorization === `Bearer ${PUBLIC_AUTH_TOKEN}` ||
-    barePassword === `password ${PUBLIC_AUTH_TOKEN}`
+    authorization === `Bearer ${config.publicAuthToken}` ||
+    barePassword === `password ${config.publicAuthToken}`
   );
 }
 
-async function forwardRequest(c: Context) {
+export function createProxyApp(config: ProxyConfig = loadProxyConfig()) {
+  const app = new Hono();
+
+  app.use(
+    "*",
+    cors({
+      origin: "*",
+      allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+      allowHeaders: ["*"],
+      exposeHeaders: ["*"],
+      credentials: true,
+      maxAge: 86400,
+    })
+  );
+
+  async function forwardRequest(c: Context) {
   const req = c.req.raw.clone();
   const path = c.req.path;
   const method = req.method;
@@ -138,7 +159,7 @@ async function forwardRequest(c: Context) {
     }
   });
 
-  if (!hasValidPublicAuth(req.headers)) {
+  if (!hasValidPublicAuth(req.headers, config)) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401,
       headers: { "content-type": "application/json" },
@@ -147,7 +168,7 @@ async function forwardRequest(c: Context) {
   
   try {
     const requestUrl = new URL(req.url);
-    const targetBaseUrl = isRegistryRequest ? REGISTRY_API_URL : LETTA_API_URL;
+    const targetBaseUrl = isRegistryRequest ? config.registryApiUrl : config.lettaApiUrl;
     const targetUrl = new URL(requestUrl.pathname + requestUrl.search, targetBaseUrl);
     console.log(`Forwarding to: ${targetUrl.toString()}`);
 
@@ -164,14 +185,14 @@ async function forwardRequest(c: Context) {
       req.headers.delete("content-length");
     }
 
-    if (!isRegistryRequest && UPSTREAM_LETTA_API_KEY) {
+    if (!isRegistryRequest && config.upstreamLettaApiKey) {
       if (req.headers.has("Authorization")) {
         req.headers.delete("Authorization");
       }
       if (req.headers.has("X-BARE-PASSWORD")) {
         req.headers.delete("X-BARE-PASSWORD");
       }
-      req.headers.set("Authorization", `Bearer ${UPSTREAM_LETTA_API_KEY}`);
+      req.headers.set("Authorization", `Bearer ${config.upstreamLettaApiKey}`);
     }
 
     let body;
@@ -228,7 +249,7 @@ async function forwardRequest(c: Context) {
         const userMessage = requestBody?.messages?.[0]?.content || '';
 
         // Send webhook with combined information
-        sendWebhook({
+        sendWebhook(config, {
           type: isStreamResponse ? "stream_started" : "message_sent",
           timestamp: new Date().toISOString(),
           prompt: userMessage, // Add the required prompt field
@@ -254,23 +275,36 @@ async function forwardRequest(c: Context) {
   }
 }
 
-app.all("*", async (c: Context) => {
-  if (c.req.method === "OPTIONS") {
-    return new Response(null, { status: 204 });
-  }
-  return forwardRequest(c);
-});
-
-serve(
-  {
-    fetch: app.fetch,
-    port: PORT,
-  },
-  (info) => {
-    console.log(`Proxy server is running on http://localhost:${info.port}`);
-    console.log(`Proxying requests to: ${LETTA_API_URL}`);
-    if (WEBHOOK_URL) {
-      console.log(`Webhook notifications enabled: ${WEBHOOK_URL}`);
+  app.all("*", async (c: Context) => {
+    if (c.req.method === "OPTIONS") {
+      return new Response(null, { status: 204 });
     }
-  }
-);
+    return forwardRequest(c);
+  });
+
+  return app;
+}
+
+export function startProxyServer(config: ProxyConfig = loadProxyConfig()) {
+  const app = createProxyApp(config);
+
+  return serve(
+    {
+      fetch: app.fetch,
+      port: config.port,
+    },
+    (info) => {
+      console.log(`Proxy server is running on http://localhost:${info.port}`);
+      console.log(`Proxying requests to: ${config.lettaApiUrl}`);
+      if (config.webhookUrl) {
+        console.log(`Webhook notifications enabled: ${config.webhookUrl}`);
+      }
+    }
+  );
+}
+
+const isMainModule = process.argv[1] != null && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isMainModule) {
+  startProxyServer();
+}
