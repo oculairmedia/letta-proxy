@@ -4,7 +4,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "check:message-search-proxy": "tsx scripts/check-message-search-proxy.ts",
+    "compare:message-search-live": "tsx scripts/compare-message-search-live.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",
